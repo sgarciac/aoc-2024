@@ -1,0 +1,7 @@
+# part 1:
+
+paste -d"-"  <(cat input | cut -d" " -f1 | sort) <(cat input | cut -d" " -f4 | sort) | bc | tr "-" " " | paste -sd+ | bc
+
+# part 2:
+cat input | cut -d" " -f1 | while read line; do echo $line " * " $(cat input | cut -d" " -f4 | grep -w $line | wc -l); done | bc | paste -sd+ | bc
+
