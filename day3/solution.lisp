@@ -6,7 +6,7 @@
   (cl-ppcre:all-matches-as-strings r s))
 
 (defun eval-mult (string)
-  (apply #'* (mapcar #'parse-integer (matches "\\d+" string))))
+  (apply #'* (mapcar #'parse-integer (m "\\d+" string))))
 
 ;; part 1
 (with-open-file (stream "input")
