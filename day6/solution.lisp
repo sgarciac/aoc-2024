@@ -2,7 +2,7 @@
 (setf *print-array* t)
 (defun make-visited () (make-hash-table :test #'equal))
 (defun visit (v pos dir)
-  (when (not (gethash pos v)) (setf (gethash pos v) (make-hash-table :test #'equal)))
+  (when (not (gethash pos v)) (setf (gethash pos v) (make-hash-table)))
   (setf (gethash dir (gethash pos v)) t))
 
 (defun visit-pos-p (v pos) (gethash pos v))
@@ -14,11 +14,15 @@
                               :visited (make-visited)))
 (defun set-obstacle (map pos) (setf (gethash pos (mapp-obstacles map))  t))
 (defun obstacle-p (map pos) (gethash pos (mapp-obstacles map)))
+
+(defun within-bounds-p (pos rows cols)
+  (and (>= (car pos) 0)
+       (>= (cdr pos) 0)
+       (< (car pos) rows)
+       (< (cdr pos) cols)))
+
 (defun in-map-p (map)
-  (and (>= (car (mapp-position map)) 0)
-       (>= (cdr (mapp-position map)) 0)
-       (< (car (mapp-position map)) (mapp-rows map))
-       (< (cdr (mapp-position map)) (mapp-cols map))))
+  (within-bounds-p (mapp-position map) (mapp-rows map) (mapp-cols map)))
 
 (defun adj-pos (pos dir)
   (case dir
@@ -30,18 +34,27 @@
 (defun turn-right (dir) (case dir (:UP :RIGHT) (:RIGHT :DOWN) (:DOWN :LEFT) (:LEFT :UP)))
 
 (defun next-step (map)
-  "advances state to next step"
+  "advances state to next step if possible. returns whether it was :OK, :LOOP or :OUT-OF-BOUNDS"
   (let ((adj (adj-pos (mapp-position map) (mapp-direction map))))
+    (when (out-of-bounds-p adj (mapp-rows map) (mapp-cols map)) (return-from next-step :OUT-OF-BOUNDS))
     (cond ((obstacle-p map adj)
-           (setf (mapp-direction map) (turn-right (mapp-direction map)))
-           (visit (mapp-visited map)
-                  (mapp-position map)
-                  (turn-right (mapp-direction map))))
-          (t (setf (mapp-position map) adj)
-             (visit (mapp-visited map)
-                    adj
-                    (mapp-direction map)))))
-  map)
+           (let ((next-direction (turn-right (mapp-direction map))))
+             (cond ((visit-pos-dir-p (mapp-visited map) (mapp-position map) next-direction)
+                    (return-from next-step :LOOP))
+                   (t
+                    (setf (mapp-direction map) next-direction)
+                    (visit (mapp-visited map)
+                           (mapp-position map)
+                           next-direction)))))
+          (t
+           (cond ((visit-pos-dir-p (mapp-visited map) adj (mapp-direction map))
+                  (return-from next-step :LOOP))
+                 (t
+                  (setf (mapp-position map) adj)
+                  (visit (mapp-visited map)
+                         adj
+                         (mapp-direction map)))))))
+  :OK)
 
 (defun load-input (file)
   (with-open-file (s file)
@@ -64,6 +77,24 @@
 
 ;; part 1
 (loop with map = (load-input "input")
-      while (in-map-p map)
-      do (next-step map)
-      finally (return (1- (hash-table-count (mapp-visited map)))))
+      for result = (next-step map)
+      while (eq result :OK)
+      finally (return (hash-table-count (mapp-visited map))))
+
+;; part 2
+(defun final-result (map)
+  (loop
+    for result = (next-step map)
+    while (eq result :OK)
+    finally (return result)))
+
+(let ((map (load-input "input")))
+  (loop for row from 0 below (mapp-rows map)
+        summing
+        (loop for col from 0 below (mapp-cols map)
+              counting
+              (and (not (obstacle-p map (cons row col)))
+                   (not (equal (mapp-position map) (cons row col)))
+                   (let ((map-copy (load-input "input")))
+                     (setf (gethash (cons row col) (mapp-obstacles map-copy)) t)
+                     (eq (final-result map-copy) :LOOP))))))
