@@ -17,7 +17,7 @@
 (defun down (pos) (make-pos (1+ (row pos)) (col pos)))
 (defun left (pos) (make-pos (row pos) (1- (col pos))))
 (defun right (pos) (make-pos (row pos) (1+ (col pos))))
-
+(defun mval (m pos) (aref m (car pos) (cdr pos)))
 (defun within-bounds (m pos)
   (and (>= (row pos) 0) (>= (col pos) 0)
        (< (row pos) (rows m)) (< (col pos) (cols m))))
@@ -44,27 +44,10 @@
   (or (= l1 l2)
       (gethash (cons (min l1 l2) (max l1 l2)) links)))
 
-(defun max-linked (link links max)
-  (loop for candidate from max downto link
-        while (not (is-linked candidate link links))
-        finally (return candidate)))
-
-(defun follow-links-up (label links max)
-  (loop for l = label then (max-linked l links max)
-        while (not (= (max-linked l links max) l))
-        finally (return l)))
-
 (defun links-to-assoc (links)
   (loop for couple being the hash-keys of links collecting couple))
 
 (defun groups (links max)
-  "the highest label transitively linked to each label"
-  (loop with groups = (make-hash-table)
-        for l from 0 upto max
-        do (setf (gethash l groups) (follow-links-up l links max))
-        finally (return groups)))
-
-(defun groups2 (links max)
   "the highest label transitively linked to each label"
   (loop with groups = (loop for l from 0 upto max collecting (list l))
         for link in (links-to-assoc links) do
@@ -125,17 +108,12 @@
                                   (aref labels row (1- col))))
                            (t (incf max-label)
                               (setf (aref labels row col) max-label))))))
-    finally (return (let ((groups2 (groups links max-label))
-                          (groups (groups2 links max-label))
+    finally (return (let ((groups (groups links max-label))
                           (regions (make-array (list (rows input) (cols input)))))
-                      (loop for k being the hash-keys of groups2 do
-                        (format t "~A ~A ~%" k (gethash k groups2)))
                       (loop for row from 0 below (rows regions)
                             do (loop for col from 0 below (cols regions)
                                      do (setf (aref regions row col) (gethash (aref  labels row col) groups))))
                       regions))))
-
-(regions (read-input "test4"))
 
 ;; part 1
 (let* ((input (read-input "input"))
@@ -159,4 +137,62 @@
           (format t "~A ~A ~A~%" l (gethash l area) (gethash l perimeter))
           (* (gethash l area) (gethash l perimeter)))))
 
-(regions (read-input "test4"))
+;; part 2
+(defun get-labels (regions)
+  "get all region labels"
+  (remove-duplicates (loop for row from 0 below (rows regions)
+                           appending (loop for col from 0 below (cols regions)
+                                           collecting (aref regions row col)))))
+
+
+(defun get-label (regions row col)
+  "extended label, covering not within-bounds regions and labeling them with -1"
+  (if (within-bounds regions (cons row col))
+      (aref regions row col) -1))
+
+(defun intersection-labels (regions row col)
+  "get the upper left
+t, upper right, bottom right bottom left labels around the intersection defined by the upper left corner of row,col cell"
+  (list (get-label regions (1- row) (1- col))
+        (get-label regions (1- row) col)
+        (get-label regions row col)
+        (get-label regions row (1- col))))
+
+(defun label-matching (regions label row col)
+  (let ((ils (intersection-labels regions row col)))
+    (mapcar (lambda (il) (= il label)) ils)))
+
+(defun count-corners (regions label row col)
+  (let ((lms (label-matching regions label row col)))
+    (cond
+      ((= 1 (count t lms)) 1)
+      ((= 1 (count nil lms)) 1)
+      ((find lms '((nil t nil t) (t nil t nil)) :test #'equal) 2)
+      (t 0))))
+
+(defun init-labels-counting-table (labels)
+  (let ((m (make-hash-table)))
+    (loop for l in labels do (setf (gethash l m) 0))
+    m))
+
+(let* ((input (read-input "input"))
+       (regions (regions input))
+       (ls (get-labels regions)))
+  (loop
+    with area = (init-labels-counting-table ls)
+    with corners = (init-labels-counting-table ls)
+    for row from 0 upto (1+ (rows input))
+    do (loop for col from 0 upto (1+ (cols input))
+             do
+                (progn
+                  ;; count area
+                  (when (within-bounds regions (cons row col))
+                    (incf (gethash (aref regions row col) area)))
+                  ;; count corners
+                  (loop for l in ls
+                        do (let ((cs (count-corners regions l row col)))
+                             (incf (gethash l corners) cs)))))
+    finally (return
+              (loop for l in ls
+                    summing (progn (format t "~A ~A ~A~%" l (gethash l area) (gethash l corners))
+                                   (* (gethash l area) (gethash l corners)))))))
