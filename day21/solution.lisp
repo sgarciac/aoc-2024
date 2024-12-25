@@ -88,7 +88,6 @@
   (remove nil (mapcar (lambda (cell) (aref *numpad-near* (row cell) (col cell)))
                       (adjs *numpad-near* (numkey-to-cell key)))))
 ;; end pad keys
-
 (defstruct state visited unvisited)
 
 (defun init-state (start)
@@ -201,7 +200,7 @@ notice that this is the path of KEYS and not of movements!"
                                   for nk in path
                                   collect (cons ck nk)))
                     (lambda (x y) (string< (string x) (string y))))))))
-
+(get-numpad-moves :a :4)
 (defun get-numpad-moves (start end)
   (or (gethash (cons start end) *num-moves-cache*)
       (setf (gethash (cons start end) *num-moves-cache*)
@@ -297,10 +296,24 @@ notice that this is the path of KEYS and not of movements!"
                            (append (get-dirpad-moves prev move) (list :a))
                            :a (1- n) memo))))))
 
-(* 28 )
+(defun solution (numkeys n)
+  (let ((memo (make-hash-table :test #'equal)))
+    (intermediate-n-cost  (loop for prev = :a then move
+                                for move in numkeys
+                                appending (append (get-numpad-moves prev move) (list :a))) :a n memo)))
 
-(let ((memo (make-hash-table :test #'equal)))
-  (intermediate-n-cost (append (get-numpad-moves :a :0) (list :a)
-                               (get-numpad-moves :0 :2) (list :a)
-                               (get-numpad-moves :2 :9) (list :a)
-                               (get-numpad-moves :9 :a) (list :a)) :a 2 memo))
+;; part1
+(+ (* 29 (solution (list :0 :2 :9 :a) 2))
+   (* 980 (solution (list :9 :8 :0 :a) 2))
+   (* 179 (solution (list :1 :7 :9 :a) 2))
+   (* 456 (solution (list :4 :5 :6 :a) 2))
+   (* 379 (solution (list :3 :7 :9 :a) 2)))
+
+(get-numpad-moves :a :1)
+
+(loop for moves = (append (get-numpad-moves :a :1) (list :a)
+                          (get-numpad-moves :1 :7) (list :a)
+                          (get-numpad-moves :7 :9) (list :a)
+                          (get-numpad-moves :9 :a) (list :a)) then (intermediate moves :a)
+      for i from 0 below 1
+      finally (return moves))
