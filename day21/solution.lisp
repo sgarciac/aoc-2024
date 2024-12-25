@@ -9,12 +9,10 @@
 (defvar *left* (cons 0 -1))
 (defvar *right* (cons 0 1))
 (defvar *down* (cons 1 0))
-
 (defun up (pos) (apply-dir pos *up*))
 (defun down (pos) (apply-dir pos *down*))
 (defun left (pos) (apply-dir pos *left*))
 (defun right (pos) (apply-dir pos *right*))
-
 (defun mval (m pos) (aref m (car pos) (cdr pos)))
 (defun within-bounds (m pos)
   (and (>= (row pos) 0) (>= (col pos) 0)
@@ -82,190 +80,227 @@
 
 (defun dir-close (key)
   "keys next to key in the directional pad"
-  (mapcar (lambda (cell) (aref *dirpad-near* (row cell) (col cell)))
-          (adjs *dirpad-near* (dirkey-to-cell key))))
+  (remove nil (mapcar (lambda (cell) (aref *dirpad-near* (row cell) (col cell)))
+                      (adjs *dirpad-near* (dirkey-to-cell key)))))
 
 (defun num-close (key)
   "keys next to key in the numerical pad"
-  (mapcar (lambda (cell) (aref *numpad-near* (row cell) (col cell)))
-          (adjs *numpad-near* (numkey-to-cell key))))
+  (remove nil (mapcar (lambda (cell) (aref *numpad-near* (row cell) (col cell)))
+                      (adjs *numpad-near* (numkey-to-cell key)))))
 ;; end pad keys
 
-;; graph of possible actions
-
-(defstruct node
-  dirkeys ;; array of direction pad keys
-  numkey  ;; numeric pad key
-  )
-
-(defun init-position (n)
-  "creates initial position with n direction pads"
-  (make-node
-   :dirkeys (make-array (list n) :initial-element :a)
-   :numkey :a))
-
-(defun node-init-numkey (key n)
-  (let ((node (init-position n)))
-    (setf (node-numkey node) key)
-    node))
-
-(defun node-dirkey (node offset)
-  (aref (node-dirkeys node) offset))
-
-(defun move (node dir offset)
-  "return next node after move, if move is legit"
-  (if (< offset (length (node-dirkeys node)))
-      ;; move the dirpad
-      (when (valid-in-dirpad (apply-dir (dirkey-to-cell (node-dirkey node offset)) dir))
-        (let ((dirkeys-copy (copy-seq (node-dirkeys node))))
-          (setf (aref dirkeys-copy offset) (cell-to-dirkey (apply-dir (dirkey-to-cell (node-dirkey node offset)) dir)))
-          (make-node
-           :dirkeys dirkeys-copy
-           :numkey (node-numkey node))))
-      ;; move the numpad if possible
-      (when (valid-in-numpad (apply-dir (numkey-to-cell (node-numkey node)) dir))
-        (make-node
-         :dirkeys (node-dirkeys node)
-         :numkey (cell-to-numkey (apply-dir (numkey-to-cell (node-numkey node)) dir))))))
-
-(defun move-human (node dir)
-  (move node dir 0))
-
-(defun push-button (node offset)
-  "return next node after pushing a button, if new position is legit"
-  (if (< offset (length (node-dirkeys node)))
-      ;; push a dirpad
-      (if (eq (node-dirkey node offset) :a)
-          ;; push next button
-          (push-button node (1+ offset))
-          ;; otherwise, move next
-          (move node (dirkey-to-dir (node-dirkey node offset)) (1+ offset)))
-      ;; push the numpad: it doesnt change the node
-      node))
-
-(defun push-button-human (node)
-  (push-button node 0))
-
-(defun valid-next-nodes (node)
-  (remove node
-          (remove nil (loop for key in (list :up :down :right :left :a)
-                            collect (if (eq key :a)
-                                        (push-button-human node)
-                                        (move-human node (dirkey-to-dir key)))))
-          :test #'equalp))
-
-;; dijkstra
 (defstruct state visited unvisited)
 
-(defun init-state (node)
+(defun init-state (start)
   (let ((state (make-state
-                :unvisited (make-hash-table :test #'equalp)
-                :visited (make-hash-table :test #'equalp)
-                )))
-    (setf (gethash node (state-unvisited state)) 0)
+                :unvisited (make-hash-table)
+                :visited (make-hash-table))))
+    (setf (gethash start (state-unvisited state)) '())
     state))
-
-(defun valid-next-nodes-non-visited (node visited)
-  (remove-if (lambda (n) (gethash n visited))
-             (remove node
-                     (remove nil
-                             (loop for key in (list :up :down :right :left :a)
-                                   collect (if (eq key :a)
-                                               (push-button-human node)
-                                               (move-human node (dirkey-to-dir key)))))
-                     :test #'equalp)))
 
 (defun closest-unvisited (state)
   (loop
     with closest = nil
-    for nodeh being the hash-keys in (state-unvisited state) using (hash-value distance)
+    for key being the hash-keys in (state-unvisited state) using (hash-value path)
     do (when (or (not closest)
-                 (< distance
-                    (gethash closest (state-unvisited state))))
-         (setf closest nodeh))
+                 (< (length path)
+                    (length (gethash closest (state-unvisited state)))))
+         (setf closest key))
     finally (return closest)))
 
+(defun in-hashtable (key table)
+  (nth-value 1 (gethash key table)))
 
-(defun dijkstra (start end)
+(defun valid-next-keys-non-visited (key close-function visited)
+  (remove-if (lambda (k) (in-hashtable k visited))
+             (funcall close-function key)))
+
+
+(defun dijkstra (start adjs-function)
+  "return the minimum path of keys from start to the others.
+notice that this is the path of KEYS and not of movements!"
   (loop
     with state = (init-state start)
     for closest = (closest-unvisited state)
     while closest
-    do (let* ((adjs (valid-next-nodes-non-visited closest (state-visited state))))
-         (when (equalp closest end) (return-from dijkstra (gethash closest (state-unvisited state))))
+    do (let* ((adjs (valid-next-keys-non-visited closest adjs-function (state-visited state))))
          (loop for adj in adjs
-               do (when (or (not (gethash adj (state-unvisited state)))
-                            (< (1+ (gethash closest (state-unvisited state)))
-                               (gethash adj (state-unvisited state))))
-                    (setf (gethash adj (state-unvisited state)) (1+ (gethash closest (state-unvisited state))))))
+               do (when (or (not (in-hashtable adj (state-unvisited state)))
+                            (< (1+ (length (gethash closest (state-unvisited state))))
+                               (length (gethash adj (state-unvisited state))))
+                            )
+                    (setf (gethash adj (state-unvisited state))
+                          (append (gethash closest (state-unvisited state)) (list adj)))))
          (setf (gethash closest (state-visited state)) (gethash closest (state-unvisited state)))
          (remhash closest (state-unvisited state)))
     finally (return (state-visited state))))
 
-(defun part1 (k1 k2 k3 k4)
-  (+ 4 (dijkstra (node-init-numkey :a 2) (node-init-numkey k1 2))
-     (dijkstra (node-init-numkey k1 2) (node-init-numkey k2 2))
-     (dijkstra (node-init-numkey k2 2) (node-init-numkey k3 2))
-     (dijkstra (node-init-numkey k3 2) (node-init-numkey k4 2))))
+;; pre-calculate moves from dirkey to dirkey and from numkey to numkey
+(defvar *dirpad-paths*) ;; (dirkey . dirkey) -> dirkeys
+(defvar *numpad-paths*) ;; (numkey . numkey) -> dirkeys
 
-(+ (* 964  (part1 :9 :6 :4 :a))
-   (* 246 (part1 :2 :4 :6 :a))
-   (* 973 (part1 :9 :7 :3 :a))
-   (* 682 (part1 :6 :8 :2 :a))
-   (* 180 (part1 :1 :8 :0 :a)))
-
-
-(dijkstra (node-init-numkey :a 25) (node-init-numkey :0 25))
-
-(defun part2 (k1 k2 k3 k4)
-  (+ 4 (gethash (node-numkey k1 2)
-                )
-     (gethash (node-numkey k2 2) (dijkstra (node-numkey k1 2)))
-     (gethash (node-numkey k3 2) (dijkstra (node-numkey k2 2)))
-     (gethash (node-numkey k4 2) (dijkstra (node-numkey k3 2)))))
-
-(+ (* 964  (part1 :9 :6 :4 :a))
-   (* 246 (part1 :2 :4 :6 :a))
-   (* 973 (part1 :9 :7 :3 :a))
-   (* 682 (part1 :6 :8 :2 :a))
-   (* 180 (part1 :1 :8 :0 :a)))
-
-
-(loop for (a b) on (list 1 2 3 4) by #'cdr do (print (cons a b)))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-(defun move-human-list (keys n)
+(defun init-dirpad-paths ()
+  (setf *dirpad-paths* (make-hash-table :test #'equal))
   (loop
-    for node = (init-position n) then (if (eq key :a)
-                                          (push-button-human node)
-                                          (move-human node (dirkey-to-dir key)))
-    for key in keys
-    do (print node)
-    finally (print node)))
+    for start in (list :up :down :left :right :a)
+    do (loop
+         with paths = (dijkstra start #'dir-close)
+         for end in (list :up :down :left :right :a)
+         do (progn
+              (format t "~A ~A ~A~%" start end (gethash end paths))
+              (setf (gethash (cons start end) *dirpad-paths*) (gethash end paths))))))
 
-(move-human-list (list :down :left :left :a :right :right :up :a :left :a :right :a) 2)
+(defun init-numpad-paths ()
+  (setf *numpad-paths* (make-hash-table :test #'equal))
+  (loop
+    for start in (list :0 :1 :2 :3 :4 :5 :6 :7 :8 :9 :a)
+    do (loop
+         with paths = (dijkstra start #'num-close)
+         for end in (list :0 :1 :2 :3 :4 :5 :6 :7 :8 :9 :a)
+         do (setf (gethash (cons start end) *numpad-paths*) (gethash end paths)))))
+
+(init-dirpad-paths)
+(init-numpad-paths)
+
+(gethash (cons :left :up)  *dirpad-paths*)
+
+(defun move-to-dir-key (move)
+  (cond ((equal move (cons -1 0)) :up)
+        ((equal move (cons 1 0)) :down)
+        ((equal move (cons 0 1)) :right)
+        ((equal move (cons 0 -1)) :left)))
+
+(defun dir-move-to-dir-key (dirk1 dirk2)
+  (let ((cell1 (dirkey-to-cell dirk1))
+        (cell2 (dirkey-to-cell dirk2)))
+    (move-to-dir-key (cons (- (car cell2) (car cell1)) (- (cdr cell2) (cdr cell1))))))
+
+(defun num-move-to-dir-key (numk1 numk2)
+  (let ((cell1 (numkey-to-cell numk1))
+        (cell2 (numkey-to-cell numk2)))
+    (move-to-dir-key (cons (- (car cell2) (car cell1)) (- (cdr cell2) (cdr cell1))))))
+
+
+;;(gethash (cons :up :right) *dirpad-paths*)
+;;(gethash (cons :a :8) *numpad-paths*)
+(defvar *dir-moves-cache*)
+(defvar *num-moves-cache*)
+
+(defun init-move-caches ()
+  (setf *dir-moves-cache* (make-hash-table :test #'equal))
+  (setf *num-moves-cache* (make-hash-table :test #'equal)))
+
+(init-move-caches)
+
+(defun get-dirpad-moves (start end)
+  (or (gethash (cons start end) *dir-moves-cache* )
+      (setf (gethash (cons start end) *dir-moves-cache* )
+            (let ((path (gethash (cons start end) *dirpad-paths*)))
+              (sort (mapcar (lambda (pair) (dir-move-to-dir-key (car pair) (cdr pair)))
+                            (loop for ck = start then nk
+                                  for nk in path
+                                  collect (cons ck nk)))
+                    (lambda (x y) (string< (string x) (string y))))))))
+
+(defun get-numpad-moves (start end)
+  (or (gethash (cons start end) *num-moves-cache*)
+      (setf (gethash (cons start end) *num-moves-cache*)
+            (let ((path (gethash (cons start end) *numpad-paths*)))
+              (sort (mapcar (lambda (pair) (num-move-to-dir-key (car pair) (cdr pair)))
+                            (loop for ck = start then nk
+                                  for nk in path
+                                  collect (cons ck nk)))
+                    (lambda (x y) (string< (string x) (string y))))))))
+
+(defun initial-costs ()
+  (loop with costs = (make-hash-table :test #'equal)
+        for start in (list :up :left :right :down :a) do
+          (loop for end in (list :up :left :right :down :a) do
+            (progn
+              (setf (gethash (cons start end) costs) 0)))
+        finally (return costs)))
+
+(defun print-costs (costs)
+  (loop for key being the hash-keys in costs using (hash-value cost)
+        do (format t "~A : ~A~%" key cost)))
+
+;;; USELESS:
+(defun next-dir-costs (costs) ;;
+  (loop with next-costs = (make-hash-table :test #'equal)
+        for start in (list :up :left :right :down :a) do
+          (loop for end in (list :up :left :right :down :a) do
+            (setf (gethash (cons start end) next-costs)
+                  (loop for prev = :a then m
+                        for m in (get-dirpad-moves start end)
+                        summing (1+ (gethash (cons prev m) costs)))))
+        finally (return next-costs)))
+
+(defun real-cost (start end n)
+  (if (<= n 0)
+      1
+      (1+ (loop
+            for prev = :a then move
+            for move in (get-dirpad-moves start end)
+            summing (real-cost prev move (1- n))))))
+
+(let ((steps 1))
+  (+
+   (real-cost :a :left 1)
+   1
+   (real-cost :left :up 1)
+   1
+   (real-cost :up :right steps)
+   (real-cost :right :up steps)
+   (real-cost :up :up steps)
+   1
+   (real-cost :up :down steps)
+   (real-cost :down :down steps)
+   (real-cost :down :down steps)
+   1))
+
+
+(defun intermediate (moves start)
+  "build the dir moves that must be pressed to produce input moves, if there is an intermediate starting in start"
+  (loop
+    for prev = start then move
+    for move in moves
+    appending (append (get-dirpad-moves prev move)
+                      (list :a))))
+
+(loop for moves = (append (get-numpad-moves :a :0) (list :a)
+                          (get-numpad-moves :0 :2) (list :a)
+                          (get-numpad-moves :2 :9) (list :a)
+                          (get-numpad-moves :9 :a) (list :a)) then (intermediate moves :a)
+      for i from 0 below 2
+      finally (return (length moves)))
+
+(defun intermediate-n (moves start n)
+  "build the dir moves that must be pressed to produce input moves, if there is an intermediate starting in start"
+  (if (zerop n)
+      moves
+      (loop
+        for prev = start then move
+        for move in moves
+        appending (intermediate-n (append (get-dirpad-moves prev move) (list :a)) :a (1- n)))))
+
+(defun intermediate-n-cost (moves start n memo)
+  "build the dir moves that must be pressed to produce input moves, if there is an intermediate starting in start"
+  (if (gethash (list moves start n) memo)
+      (gethash (list moves start n) memo)
+      (setf (gethash (list moves start n) memo)
+            (if (zerop n)
+                (length moves)
+                (loop
+                  for prev = start then move
+                  for move in moves
+                  summing (intermediate-n-cost
+                           (append (get-dirpad-moves prev move) (list :a))
+                           :a (1- n) memo))))))
+
+(* 28 )
+
+(let ((memo (make-hash-table :test #'equal)))
+  (intermediate-n-cost (append (get-numpad-moves :a :0) (list :a)
+                               (get-numpad-moves :0 :2) (list :a)
+                               (get-numpad-moves :2 :9) (list :a)
+                               (get-numpad-moves :9 :a) (list :a)) :a 2 memo))
