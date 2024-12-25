@@ -1,4 +1,4 @@
-;;;; 2d matrix stuff
+>;;;; 2d matrix stuff
 (defun rows (m) (array-dimension m 0))
 (defun cols (m) (array-dimension m 1))
 (defun row (pos) (car pos))
@@ -24,9 +24,7 @@
 
 ;;; pad keys
 (defvar *dirpad-near*)
-(defvar *numpad-near*)
 (defvar *dirkey-to-cell*)
-(defvar *numkey-to-cell*)
 
 (defun init-dirpad ()
   (setf *dirpad-near* (make-array '(2 3) :initial-element nil))
@@ -43,125 +41,25 @@
 (defun dirkey-to-dir (key)
   (ecase key (:up *up*) (:down *down*) (:left *left*) (:right *right*)))
 
-(defun init-numpad ()
-  (setf *numpad-near* (make-array '(4 3) :initial-element nil))
-  (setf *numkey-to-cell* (make-hash-table))
-  (loop for row in '((:7 :8 :9) (:4 :5 :6) (:1 :2 :3) (nil :0 :a))
-        for r = 0 then (1+ r)
-        do (loop for key in row
-                 for c = 0 then (1+ c)
-                 do (progn
-                      (setf (aref *numpad-near* r c) key)
-                      (setf (gethash key *numkey-to-cell*) (cons r c))
-                      ))))
 
 (defun valid-in-dirpad (pos)
   (and (within-bounds *dirpad-near* pos)
        (aref *dirpad-near* (car pos) (cdr pos))))
 
-(defun valid-in-numpad (pos)
-  (and (within-bounds *numpad-near* pos)
-       (aref *numpad-near* (car pos) (cdr pos))))
-
 (init-dirpad)
-(init-numpad)
 
 (defun dirkey-to-cell (key)
   (gethash key *dirkey-to-cell*))
 
-(defun numkey-to-cell (key)
-  (gethash key *numkey-to-cell*))
 
 (defun cell-to-dirkey (cell)
   (aref *dirpad-near* (car cell) (cdr cell)))
-
-(defun cell-to-numkey (cell)
-  (aref *numpad-near* (car cell) (cdr cell)))
 
 (defun dir-close (key)
   "keys next to key in the directional pad"
   (remove nil (mapcar (lambda (cell) (aref *dirpad-near* (row cell) (col cell)))
                       (adjs *dirpad-near* (dirkey-to-cell key)))))
 
-(defun num-close (key)
-  "keys next to key in the numerical pad"
-  (remove nil (mapcar (lambda (cell) (aref *numpad-near* (row cell) (col cell)))
-                      (adjs *numpad-near* (numkey-to-cell key)))))
-;; end pad keys
-(defstruct state visited unvisited)
-
-(defun init-state (start)
-  (let ((state (make-state
-                :unvisited (make-hash-table)
-                :visited (make-hash-table))))
-    (setf (gethash start (state-unvisited state)) '())
-    state))
-
-(defun closest-unvisited (state)
-  (loop
-    with closest = nil
-    for key being the hash-keys in (state-unvisited state) using (hash-value path)
-    do (when (or (not closest)
-                 (< (length path)
-                    (length (gethash closest (state-unvisited state)))))
-         (setf closest key))
-    finally (return closest)))
-
-(defun in-hashtable (key table)
-  (nth-value 1 (gethash key table)))
-
-(defun valid-next-keys-non-visited (key close-function visited)
-  (remove-if (lambda (k) (in-hashtable k visited))
-             (funcall close-function key)))
-
-
-(defun dijkstra (start adjs-function)
-  "return the minimum path of keys from start to the others.
-notice that this is the path of KEYS and not of movements!"
-  (loop
-    with state = (init-state start)
-    for closest = (closest-unvisited state)
-    while closest
-    do (let* ((adjs (valid-next-keys-non-visited closest adjs-function (state-visited state))))
-         (loop for adj in adjs
-               do (when (or (not (in-hashtable adj (state-unvisited state)))
-                            (< (1+ (length (gethash closest (state-unvisited state))))
-                               (length (gethash adj (state-unvisited state))))
-                            )
-                    (setf (gethash adj (state-unvisited state))
-                          (append (gethash closest (state-unvisited state)) (list adj)))))
-         (setf (gethash closest (state-visited state)) (gethash closest (state-unvisited state)))
-         (remhash closest (state-unvisited state)))
-    finally (return (state-visited state))))
-
-;; pre-calculate moves from dirkey to dirkey and from numkey to numkey
-(defvar *dirpad-paths*) ;; (dirkey . dirkey) -> dirkeys
-(defvar *numpad-paths*) ;; (numkey . numkey) -> dirkeys
-
-(defun init-dirpad-paths ()
-  (setf *dirpad-paths* (make-hash-table :test #'equal))
-  (loop
-    for start in (list :up :down :left :right :a)
-    do (loop
-         with paths = (dijkstra start #'dir-close)
-         for end in (list :up :down :left :right :a)
-         do (progn
-              (format t "~A ~A ~A~%" start end (gethash end paths))
-              (setf (gethash (cons start end) *dirpad-paths*) (gethash end paths))))))
-
-(defun init-numpad-paths ()
-  (setf *numpad-paths* (make-hash-table :test #'equal))
-  (loop
-    for start in (list :0 :1 :2 :3 :4 :5 :6 :7 :8 :9 :a)
-    do (loop
-         with paths = (dijkstra start #'num-close)
-         for end in (list :0 :1 :2 :3 :4 :5 :6 :7 :8 :9 :a)
-         do (setf (gethash (cons start end) *numpad-paths*) (gethash end paths)))))
-
-(init-dirpad-paths)
-(init-numpad-paths)
-
-(gethash (cons :left :up)  *dirpad-paths*)
 
 (defun move-to-dir-key (move)
   (cond ((equal move (cons -1 0)) :up)
@@ -174,113 +72,30 @@ notice that this is the path of KEYS and not of movements!"
         (cell2 (dirkey-to-cell dirk2)))
     (move-to-dir-key (cons (- (car cell2) (car cell1)) (- (cdr cell2) (cdr cell1))))))
 
-(defun num-move-to-dir-key (numk1 numk2)
-  (let ((cell1 (numkey-to-cell numk1))
-        (cell2 (numkey-to-cell numk2)))
-    (move-to-dir-key (cons (- (car cell2) (car cell1)) (- (cdr cell2) (cdr cell1))))))
-
-
 ;;(gethash (cons :up :right) *dirpad-paths*)
 ;;(gethash (cons :a :8) *numpad-paths*)
-(defvar *dir-moves-cache*)
-(defvar *num-moves-cache*)
-
-(defun init-move-caches ()
-  (setf *dir-moves-cache* (make-hash-table :test #'equal))
-  (setf *num-moves-cache* (make-hash-table :test #'equal)))
-
-(init-move-caches)
-
 (defun get-dirpad-moves (start end)
-  (or (gethash (cons start end) *dir-moves-cache* )
-      (setf (gethash (cons start end) *dir-moves-cache* )
-            (let ((path (gethash (cons start end) *dirpad-paths*)))
-              (sort (mapcar (lambda (pair) (dir-move-to-dir-key (car pair) (cdr pair)))
-                            (loop for ck = start then nk
-                                  for nk in path
-                                  collect (cons ck nk)))
-                    (lambda (x y) (string< (string x) (string y))))))))
-(get-numpad-moves :a :4)
-(defun get-numpad-moves (start end)
-  (or (gethash (cons start end) *num-moves-cache*)
-      (setf (gethash (cons start end) *num-moves-cache*)
-            (let ((path (gethash (cons start end) *numpad-paths*)))
-              (sort (mapcar (lambda (pair) (num-move-to-dir-key (car pair) (cdr pair)))
-                            (loop for ck = start then nk
-                                  for nk in path
-                                  collect (cons ck nk)))
-                    (lambda (x y) (string< (string x) (string y))))))))
-
-(defun initial-costs ()
-  (loop with costs = (make-hash-table :test #'equal)
-        for start in (list :up :left :right :down :a) do
-          (loop for end in (list :up :left :right :down :a) do
-            (progn
-              (setf (gethash (cons start end) costs) 0)))
-        finally (return costs)))
-
-(defun print-costs (costs)
-  (loop for key being the hash-keys in costs using (hash-value cost)
-        do (format t "~A : ~A~%" key cost)))
-
-;;; USELESS:
-(defun next-dir-costs (costs) ;;
-  (loop with next-costs = (make-hash-table :test #'equal)
-        for start in (list :up :left :right :down :a) do
-          (loop for end in (list :up :left :right :down :a) do
-            (setf (gethash (cons start end) next-costs)
-                  (loop for prev = :a then m
-                        for m in (get-dirpad-moves start end)
-                        summing (1+ (gethash (cons prev m) costs)))))
-        finally (return next-costs)))
-
-(defun real-cost (start end n)
-  (if (<= n 0)
-      1
-      (1+ (loop
-            for prev = :a then move
-            for move in (get-dirpad-moves start end)
-            summing (real-cost prev move (1- n))))))
-
-(let ((steps 1))
-  (+
-   (real-cost :a :left 1)
-   1
-   (real-cost :left :up 1)
-   1
-   (real-cost :up :right steps)
-   (real-cost :right :up steps)
-   (real-cost :up :up steps)
-   1
-   (real-cost :up :down steps)
-   (real-cost :down :down steps)
-   (real-cost :down :down steps)
-   1))
-
-
-(defun intermediate (moves start)
-  "build the dir moves that must be pressed to produce input moves, if there is an intermediate starting in start"
-  (loop
-    for prev = start then move
-    for move in moves
-    appending (append (get-dirpad-moves prev move)
-                      (list :a))))
-
-(loop for moves = (append (get-numpad-moves :a :0) (list :a)
-                          (get-numpad-moves :0 :2) (list :a)
-                          (get-numpad-moves :2 :9) (list :a)
-                          (get-numpad-moves :9 :a) (list :a)) then (intermediate moves :a)
-      for i from 0 below 2
-      finally (return (length moves)))
-
-(defun intermediate-n (moves start n)
-  "build the dir moves that must be pressed to produce input moves, if there is an intermediate starting in start"
-  (if (zerop n)
-      moves
-      (loop
-        for prev = start then move
-        for move in moves
-        appending (intermediate-n (append (get-dirpad-moves prev move) (list :a)) :a (1- n)))))
+  (cond
+    ((and (eq start :left) (eq end :down)) (list :right))
+    ((and (eq start :left) (eq end :up)) (list :right :up))
+    ((and (eq start :left) (eq end :a)) (list :right :right :up))
+    ((and (eq start :left) (eq end :right)) (list :right :right))
+    ((and (eq start :down) (eq end :left)) (list :left))
+    ((and (eq start :down) (eq end :up)) (list :up))
+    ((and (eq start :down) (eq end :a)) (list :up :right))
+    ((and (eq start :down) (eq end :right)) (list :right))
+    ((and (eq start :up) (eq end :down)) (list :down))
+    ((and (eq start :up) (eq end :left)) (list :down :left))
+    ((and (eq start :up) (eq end :right)) (list :down :right))
+    ((and (eq start :up) (eq end :a)) (list :right))
+    ((and (eq start :right) (eq end :down)) (list :left))
+    ((and (eq start :right) (eq end :up)) (list :left :up))
+    ((and (eq start :right) (eq end :a)) (list :up))
+    ((and (eq start :right) (eq end :left)) (list :left :left))
+    ((and (eq start :a) (eq end :down)) (list :left :down))
+    ((and (eq start :a) (eq end :up)) (list :left))
+    ((and (eq start :a) (eq end :left)) (list :down :left :left ))
+    ((and (eq start :a) (eq end :right)) (list :down))))
 
 (defun intermediate-n-cost (moves start n memo)
   "build the dir moves that must be pressed to produce input moves, if there is an intermediate starting in start"
@@ -296,24 +111,42 @@ notice that this is the path of KEYS and not of movements!"
                            (append (get-dirpad-moves prev move) (list :a))
                            :a (1- n) memo))))))
 
-(defun solution (numkeys n)
+(defun solution (dirkeys n)
   (let ((memo (make-hash-table :test #'equal)))
-    (intermediate-n-cost  (loop for prev = :a then move
-                                for move in numkeys
-                                appending (append (get-numpad-moves prev move) (list :a))) :a n memo)))
+    (intermediate-n-cost  dirkeys :a n memo)))
+
+
+(defparameter *dirs964a* (list :up :up :up :a :down :a :left :left :a :right :right :down :down :a))
+(defparameter *dirs246a* (list :left :up :a :left :up :a :right :right :a :down :down :a))
+(defparameter *dirs973a* (list :up :up :up :a :left :left :a :down :down :right :right  :a :down :a))
+(defparameter *dirs682a* (list :up :up :a :left :up :a :down :down :a :down :right :a))
+(defparameter *dirs180a* (list  :up :left :left :a  :up :up :right :a :down :down  :down :a :right :a))
+
+
+(defparameter *dirs029a* (list :left :a :up :a :up :up :right :a :down :down :down :a))
+(defparameter *dirs980a* (list :up :up :up :a :left :a :down :down :down :a :right :a))
+(defparameter *dirs179a* (list :up :left :left :a :up :up :a :right :right :a :down :down :down :a))
+(defparameter *dirs456a* (list :up :up :left :left :a :right :a :right :a :down :down :a))
+(defparameter *dirs379a* (list :up :a :left :left :up :up :a :right :right :a :down :down :down :a))
+
+;; test
+(+ (* 29 (solution *dirs029a* 2))
+   (* 980 (solution *dirs980a* 2))
+   (* 179 (solution *dirs179a* 2 ))
+   (* 456 (solution *dirs456a* 2))
+   (* 379 (solution *dirs379a* 2)))
 
 ;; part1
-(+ (* 29 (solution (list :0 :2 :9 :a) 2))
-   (* 980 (solution (list :9 :8 :0 :a) 2))
-   (* 179 (solution (list :1 :7 :9 :a) 2))
-   (* 456 (solution (list :4 :5 :6 :a) 2))
-   (* 379 (solution (list :3 :7 :9 :a) 2)))
+(+ (* 964 (solution *dirs964a* 2))
+   (* 246 (solution *dirs246a* 2))
+   (* 973 (solution *dirs973a* 2))
+   (* 682 (solution *dirs682a* 2))
+   (* 180 (solution *dirs180a* 2)))
 
-(get-numpad-moves :a :1)
 
-(loop for moves = (append (get-numpad-moves :a :1) (list :a)
-                          (get-numpad-moves :1 :7) (list :a)
-                          (get-numpad-moves :7 :9) (list :a)
-                          (get-numpad-moves :9 :a) (list :a)) then (intermediate moves :a)
-      for i from 0 below 1
-      finally (return moves))
+;; part2
+(+ (* 964 (solution *dirs964a* 25))
+   (* 246 (solution *dirs246a* 25))
+   (* 973 (solution *dirs973a* 25))
+   (* 682 (solution *dirs682a* 25))
+   (* 180 (solution *dirs180a* 25)))
