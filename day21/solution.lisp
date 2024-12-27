@@ -145,8 +145,8 @@
 
 
 ;; part2
-(+ (* 964 (solution *dirs964a* 25))
-   (* 246 (solution *dirs246a* 25))
-   (* 973 (solution *dirs973a* 25))
-   (* 682 (solution *dirs682a* 25))
-   (* 180 (solution *dirs180a* 25)))
+(time  (+ (* 964 (solution *dirs964a* 25))
+          (* 246 (solution *dirs246a* 25))
+          (* 973 (solution *dirs973a* 25))
+          (* 682 (solution *dirs682a* 25))
+          (* 180 (solution *dirs180a* 25))))
